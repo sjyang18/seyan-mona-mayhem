@@ -1,5 +1,5 @@
 {
-  "name": "mona-mayhem",
+  "name": "signal-card",
   "type": "module",
   "version": "0.0.1",
   "scripts": {
@@ -7,13 +7,16 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:ui": "playwright test",
+    "test:ui:debug": "playwright test --ui"
   },
   "dependencies": {
     "@astrojs/node": "^10.1.4",
     "astro": "^6.4.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.54.2",
     "@eslint/js": "^10.0.1",
     "eslint": "^10.5.0",
     "eslint-plugin-astro": "^1.7.0",

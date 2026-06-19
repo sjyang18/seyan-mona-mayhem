@@ -1,0 +1,576 @@
+---
+import type { CacheState, ProfilePayload } from '../lib/github-profile';
+
+interface Props {
+  profile: ProfilePayload;
+  cacheState?: CacheState;
+  viewMode?: 'card' | 'activity';
+}
+
+const { profile, cacheState = 'MISS', viewMode = 'card' } = Astro.props;
+
+const formatter = new Intl.NumberFormat('en-US');
+const relativeTimeFormatter = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+const contributionWeekdays = ['', 'Mon', '', 'Wed', '', 'Fri', ''];
+const longDateFormatter = new Intl.DateTimeFormat('en-US', {
+  weekday: 'long',
+  month: 'long',
+  day: 'numeric',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+
+const formatRelativeTime = (value: string | null): string | null => {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) {
+    return null;
+  }
+
+  const diffMs = date.valueOf() - Date.now();
+  const diffHours = Math.round(diffMs / (1000 * 60 * 60));
+
+  if (Math.abs(diffHours) < 24) {
+    return relativeTimeFormatter.format(diffHours, 'hour');
+  }
+
+  return relativeTimeFormatter.format(Math.round(diffHours / 24), 'day');
+};
+
+const lastActiveLabel = formatRelativeTime(profile.profile.lastActiveAt);
+const contributionMonths = profile.contributions.weeks.map((week, index, weeks) => {
+  const currentMonth = new Date(`${week.firstDay}T00:00:00.000Z`).toLocaleString('en-US', {
+    month: 'short',
+    timeZone: 'UTC',
+  });
+  const previousMonth = index > 0
+    ? new Date(`${weeks[index - 1].firstDay}T00:00:00.000Z`).toLocaleString('en-US', {
+      month: 'short',
+      timeZone: 'UTC',
+    })
+    : null;
+
+  return previousMonth === currentMonth ? '' : currentMonth;
+});
+
+const contributionTooltip = (date: string, count: number): string => {
+  const formattedDate = longDateFormatter.format(new Date(`${date}T00:00:00.000Z`));
+  const label = count === 1 ? 'contribution' : 'contributions';
+  return `${formatter.format(count)} ${label} on ${formattedDate}`;
+};
+---
+
+<article class:list={["card-shell", viewMode === 'activity' && 'activity-view']}>
+  <div class="card-header">
+    <img
+      class="avatar"
+      src={profile.profile.avatarUrl}
+      alt={`${profile.profile.login} avatar`}
+      loading="lazy"
+      width="104"
+      height="104"
+    />
+
+    <div class="identity">
+      <p class="eyebrow">GitHub Dev Card</p>
+      <h2>{profile.profile.name ?? profile.profile.login}</h2>
+      <a class="handle" href={profile.profile.profileUrl} target="_blank" rel="noreferrer">
+        @{profile.profile.login}
+      </a>
+      {
+        profile.profile.bio && <p class="bio">{profile.profile.bio}</p>
+      }
+    </div>
+
+    <div class="status-cluster">
+      <span class="status-pill">{cacheState}</span>
+      <span class="status-pill muted">Fetched {new Date(profile.fetchedAt).toLocaleString()}</span>
+    </div>
+  </div>
+
+  <div class="metadata-row">
+    {
+      profile.profile.location && <span>Location: {profile.profile.location}</span>
+    }
+    {
+      profile.profile.company && <span>Company: {profile.profile.company}</span>
+    }
+    {
+      lastActiveLabel && <span>Last active: {lastActiveLabel}</span>
+    }
+  </div>
+
+  <div class="stats-grid">
+    <div>
+      <span class="stat-label">Repos</span>
+      <strong>{formatter.format(profile.profile.publicRepos)}</strong>
+    </div>
+    <div>
+      <span class="stat-label">Followers</span>
+      <strong>{formatter.format(profile.profile.followers)}</strong>
+    </div>
+    <div>
+      <span class="stat-label">Following</span>
+      <strong>{formatter.format(profile.profile.following)}</strong>
+    </div>
+  </div>
+
+  {
+    profile.profile.topLanguages.length > 0 && (
+      <section class="language-strip" aria-label="Top languages">
+        {profile.profile.topLanguages.map((language) => <span>{language}</span>)}
+      </section>
+    )
+  }
+
+  <section class="contribution-panel">
+    <div class="panel-heading contribution-heading">
+      <div>
+        <h3>Contribution activity</h3>
+        <p>
+          {formatter.format(profile.contributions.totalContributions)} contributions in the last year
+        </p>
+      </div>
+    </div>
+
+    <div class="calendar-shell">
+      <div class="month-row" aria-hidden="true">
+        <span class="month-spacer"></span>
+        <div class="month-grid">
+          {contributionMonths.map((month) => <span>{month}</span>)}
+        </div>
+      </div>
+
+      <div class="calendar-grid">
+        <div class="weekday-column" aria-hidden="true">
+          {contributionWeekdays.map((day) => <span>{day}</span>)}
+        </div>
+
+        <div class="week-columns" role="img" aria-label={`Contribution graph for ${profile.profile.login}`}>
+          {
+            profile.contributions.weeks.map((week) => (
+              <div class="week-column">
+                {
+                  week.contributionDays.map((day) => (
+                    <span
+                      class="day-cell"
+                      style={`--level-color: ${profile.contributions.colors[day.level] ?? profile.contributions.colors[0]};`}
+                      title={contributionTooltip(day.date, day.count)}
+                      aria-label={contributionTooltip(day.date, day.count)}
+                    ></span>
+                  ))
+                }
+              </div>
+            ))
+          }
+        </div>
+      </div>
+
+      <div class="legend-row" aria-hidden="true">
+        <span>Less</span>
+        <div class="legend-swatches">
+          {
+            profile.contributions.colors.map((color) => (
+              <span class="legend-cell" style={`--level-color: ${color};`}></span>
+            ))
+          }
+        </div>
+        <span>More</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="repo-panel">
+    <div class="panel-heading">
+      <h3>Recent repositories</h3>
+      <a href={profile.sourceUrl} target="_blank" rel="noreferrer">
+        Open profile
+      </a>
+    </div>
+
+    <ul class="repo-list">
+      {
+        profile.profile.recentRepos.length > 0 ? (
+          profile.profile.recentRepos.map((repo) => (
+            <li class="repo-item">
+              <div class="repo-copy">
+                <a href={repo.url} target="_blank" rel="noreferrer">
+                  {repo.name}
+                </a>
+                {
+                  repo.description && <p>{repo.description}</p>
+                }
+              </div>
+
+              <div class="repo-meta">
+                {
+                  repo.language && <span>{repo.language}</span>
+                }
+                <span>{formatter.format(repo.stars)} stars</span>
+              </div>
+            </li>
+          ))
+        ) : (
+          <li class="repo-item empty-state">No public repositories were returned for this profile.</li>
+        )
+      }
+    </ul>
+  </section>
+</article>
+
+<style>
+  .card-shell {
+    position: relative;
+    display: grid;
+    gap: 1.5rem;
+    padding: 1.5rem;
+    border: 1px solid rgba(118, 232, 212, 0.26);
+    border-radius: 1.5rem;
+    background:
+      linear-gradient(180deg, rgba(9, 15, 40, 0.94), rgba(11, 18, 32, 0.98)),
+      radial-gradient(circle at top right, rgba(249, 127, 81, 0.2), transparent 28%);
+    box-shadow:
+      0 18px 54px rgba(2, 6, 23, 0.48),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+
+  .activity-view {
+    gap: 1.2rem;
+  }
+
+  .activity-view .contribution-panel {
+    order: -1;
+    padding: 1.35rem;
+    background:
+      linear-gradient(180deg, rgba(7, 14, 32, 0.86), rgba(6, 12, 26, 0.98)),
+      radial-gradient(circle at top right, rgba(118, 232, 212, 0.1), transparent 28%);
+  }
+
+  .activity-view .repo-panel {
+    opacity: 0.86;
+  }
+
+  .card-header {
+    display: grid;
+    gap: 1.25rem;
+    align-items: start;
+  }
+
+  .avatar {
+    width: 104px;
+    height: 104px;
+    border-radius: 1.4rem;
+    border: 2px solid rgba(118, 232, 212, 0.4);
+    object-fit: cover;
+    box-shadow: 0 10px 26px rgba(11, 210, 183, 0.22);
+  }
+
+  .identity {
+    display: grid;
+    gap: 0.45rem;
+  }
+
+  .identity h2 {
+    margin: 0;
+    font-size: clamp(1.8rem, 4vw, 2.8rem);
+    line-height: 0.96;
+    letter-spacing: -0.04em;
+  }
+
+  .eyebrow,
+  .handle,
+  .stat-label,
+  .status-pill,
+  .repo-meta,
+  .metadata-row,
+  .panel-heading a {
+    font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  }
+
+  .eyebrow {
+    margin: 0;
+    font-size: 0.74rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(118, 232, 212, 0.9);
+  }
+
+  .handle {
+    width: fit-content;
+    color: rgba(255, 198, 160, 0.96);
+    text-decoration: none;
+  }
+
+  .bio {
+    margin: 0.3rem 0 0;
+    max-width: 58ch;
+    color: rgba(232, 240, 255, 0.84);
+  }
+
+  .status-cluster {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+  }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.45rem 0.75rem;
+    border-radius: 999px;
+    background: rgba(118, 232, 212, 0.12);
+    color: rgba(198, 255, 245, 0.96);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .status-pill.muted {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(224, 233, 250, 0.82);
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .metadata-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+    color: rgba(214, 223, 240, 0.78);
+    font-size: 0.86rem;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.9rem;
+  }
+
+  .stats-grid div {
+    display: grid;
+    gap: 0.2rem;
+    padding: 1rem;
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .stat-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: rgba(181, 194, 220, 0.72);
+  }
+
+  .stats-grid strong {
+    font-size: clamp(1.3rem, 2vw, 1.8rem);
+  }
+
+  .language-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+  }
+
+  .language-strip span {
+    padding: 0.5rem 0.8rem;
+    border-radius: 999px;
+    background: linear-gradient(135deg, rgba(249, 127, 81, 0.2), rgba(255, 209, 102, 0.22));
+    color: rgba(255, 237, 223, 0.98);
+    font-size: 0.86rem;
+  }
+
+  .repo-panel {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .contribution-panel {
+    display: grid;
+    gap: 1rem;
+    padding: 1.1rem;
+    border-radius: 1.2rem;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .contribution-heading p {
+    margin: 0.35rem 0 0;
+    color: rgba(214, 223, 240, 0.74);
+  }
+
+  .calendar-shell {
+    display: grid;
+    gap: 0.55rem;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+  }
+
+  .month-row,
+  .calendar-grid {
+    display: grid;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    gap: 0.45rem;
+  }
+
+  .month-spacer {
+    display: block;
+  }
+
+  .month-grid,
+  .week-columns {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 11px;
+    gap: 2px;
+  }
+
+  .month-grid span {
+    min-width: 11px;
+    font-size: 0.66rem;
+    color: rgba(181, 194, 220, 0.72);
+    font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  }
+
+  .weekday-column {
+    display: grid;
+    grid-template-rows: repeat(7, 11px);
+    gap: 2px;
+    align-items: center;
+    font-size: 0.68rem;
+    color: rgba(181, 194, 220, 0.72);
+    font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  }
+
+  .weekday-column span {
+    display: flex;
+    align-items: center;
+    height: 11px;
+  }
+
+  .week-column {
+    display: grid;
+    grid-template-rows: repeat(7, 11px);
+    gap: 2px;
+  }
+
+  .day-cell,
+  .legend-cell {
+    display: block;
+    width: 11px;
+    height: 11px;
+    border-radius: 2px;
+    background: var(--level-color);
+  }
+
+  .day-cell {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    transition: transform 120ms ease, box-shadow 120ms ease;
+  }
+
+  .day-cell:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+      0 0 0 1px rgba(118, 232, 212, 0.22);
+  }
+
+  .legend-row {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.45rem;
+    color: rgba(181, 194, 220, 0.72);
+    font-size: 0.72rem;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  }
+
+  .legend-swatches {
+    display: flex;
+    gap: 0.3rem;
+  }
+
+  .panel-heading {
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .panel-heading h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+
+  .panel-heading a,
+  .repo-copy a {
+    color: rgba(135, 245, 225, 0.94);
+    text-decoration: none;
+  }
+
+  .repo-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 0.8rem;
+  }
+
+  .repo-item {
+    display: grid;
+    gap: 0.75rem;
+    padding: 1rem;
+    border-radius: 1rem;
+    background: rgba(3, 10, 24, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .repo-copy {
+    display: grid;
+    gap: 0.35rem;
+  }
+
+  .repo-copy a {
+    width: fit-content;
+    font-weight: 700;
+  }
+
+  .repo-copy p {
+    margin: 0;
+    color: rgba(217, 228, 245, 0.76);
+  }
+
+  .repo-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    color: rgba(191, 204, 228, 0.76);
+    font-size: 0.8rem;
+  }
+
+  .empty-state {
+    color: rgba(214, 223, 240, 0.72);
+    font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  }
+
+  @media (min-width: 780px) {
+    .card-header {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .stats-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .panel-heading {
+      align-items: start;
+      flex-direction: column;
+    }
+  }
+</style>

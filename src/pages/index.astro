@@ -1,4 +1,40 @@
 ---
+import DevCard from '../components/DevCard.astro';
+import {
+  ApiError,
+  getProfileEntry,
+  isValidUsername,
+  type CacheState,
+  type ProfilePayload,
+} from '../lib/github-profile';
+
+const seededUsername = 'sjyang18';
+const queryUsername = Astro.url.searchParams.get('username')?.trim();
+const activeUsername = queryUsername || seededUsername;
+const requestedView = Astro.url.searchParams.get('view');
+const activeView = requestedView === 'activity' ? 'activity' : 'card';
+
+let profile: ProfilePayload | null = null;
+let cacheState: CacheState = 'MISS';
+let errorMessage: string | null = null;
+
+if (activeUsername) {
+  if (!isValidUsername(activeUsername)) {
+    errorMessage = 'That does not look like a valid GitHub username.';
+  } else {
+    try {
+      const response = await getProfileEntry(activeUsername);
+      profile = response.entry.payload;
+      cacheState = response.cacheState;
+    } catch (error) {
+      if (error instanceof ApiError) {
+        errorMessage = error.message;
+      } else {
+        errorMessage = 'Unexpected server error while loading the profile card.';
+      }
+    }
+  }
+}
 ---
 
 <html lang="en">
@@ -7,10 +43,450 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width" />
     <meta name="generator" content={Astro.generator} />
-    <title>Mona Mayhem</title>
+    <title>Signal Card</title>
+    <meta
+      name="description"
+      content="Generate a polished GitHub developer card from a public profile with Astro."
+    />
   </head>
   <body>
-    <h1>Mona Mayhem</h1>
-    <p>Welcome to Mona Mayhem! Time to build a GitHub Contribution Battle Arena.</p>
+    <main class="shell">
+      <section class="hero">
+        <p class="kicker">GitHub Dev Card Generator</p>
+        <h1>Turn a GitHub handle into a crisp, shareable profile snapshot.</h1>
+        <p class="lede">
+          Signal Card pulls public GitHub profile details, recent repositories, and language signals
+          into one clean card. Start with your own handle or swap in anyone else.
+        </p>
+
+        <form class="lookup" method="get" action="/">
+          <label for="username">GitHub username</label>
+          <input type="hidden" name="view" value={activeView} data-view-input />
+          <div class="lookup-row">
+            <input
+              id="username"
+              name="username"
+              type="text"
+              value={activeUsername}
+              autocomplete="username"
+              spellcheck="false"
+              placeholder="octocat"
+            />
+            <button type="submit" data-submit-button>Build card</button>
+          </div>
+          <p class="hint" data-form-status>
+            Tip: this page ships with your username preloaded so the first result is instant.
+          </p>
+        </form>
+
+        <div class="view-toggle" role="tablist" aria-label="Profile display mode">
+          <a
+            href={`/?username=${encodeURIComponent(activeUsername)}&view=card`}
+            class:list={["view-chip", activeView === 'card' && 'active']}
+            data-view-toggle
+            data-view-mode="card"
+            role="tab"
+            aria-selected={activeView === 'card' ? 'true' : 'false'}
+          >
+            Profile card
+          </a>
+          <a
+            href={`/?username=${encodeURIComponent(activeUsername)}&view=activity`}
+            class:list={["view-chip", activeView === 'activity' && 'active']}
+            data-view-toggle
+            data-view-mode="activity"
+            role="tab"
+            aria-selected={activeView === 'activity' ? 'true' : 'false'}
+          >
+            Activity focus
+          </a>
+        </div>
+
+        <div class="badge-row" aria-label="Highlights">
+          <span>Server-rendered first</span>
+          <span>GitHub REST profile data</span>
+          <span>Cached for repeat lookups</span>
+        </div>
+      </section>
+
+      <section class="result-panel" aria-live="polite" data-result-panel>
+        {
+          errorMessage ? (
+            <article class="error-card">
+              <p class="error-kicker">Lookup issue</p>
+              <h2>Profile card unavailable</h2>
+              <p>{errorMessage}</p>
+            </article>
+          ) : profile ? (
+            <DevCard profile={profile} cacheState={cacheState} viewMode={activeView} />
+          ) : (
+            <article class="placeholder-card">
+              <p>Enter a username to generate a profile card.</p>
+            </article>
+          )
+        }
+      </section>
+    </main>
+
+    <script>
+      const form = document.querySelector('.lookup');
+      const resultPanel = document.querySelector('[data-result-panel]');
+      const status = document.querySelector('[data-form-status]');
+      const submitButton = document.querySelector('[data-submit-button]');
+      const viewInput = document.querySelector('[data-view-input]');
+      const viewToggles = [...document.querySelectorAll('[data-view-toggle]')];
+
+      if (form instanceof HTMLFormElement && resultPanel instanceof HTMLElement) {
+        const defaultStatus = status?.textContent ?? '';
+
+        const syncViewToggleState = (mode: 'card' | 'activity') => {
+          if (viewInput instanceof HTMLInputElement) {
+            viewInput.value = mode;
+          }
+
+          for (const toggle of viewToggles) {
+            if (!(toggle instanceof HTMLAnchorElement)) {
+              continue;
+            }
+
+            const isActive = toggle.dataset.viewMode === mode;
+            toggle.classList.toggle('active', isActive);
+            toggle.setAttribute('aria-selected', isActive ? 'true' : 'false');
+          }
+        };
+
+        const loadPanel = async (nextUrl: URL, statusMessage: string) => {
+          if (submitButton instanceof HTMLButtonElement) {
+            submitButton.disabled = true;
+            submitButton.textContent = 'Loading...';
+          }
+
+          if (status instanceof HTMLElement) {
+            status.textContent = statusMessage;
+          }
+
+          resultPanel.setAttribute('aria-busy', 'true');
+
+          try {
+            const response = await fetch(nextUrl, {
+              headers: {
+                'X-Requested-With': 'signal-card-enhanced-form',
+              },
+            });
+
+            if (!response.ok) {
+              throw new Error(`Request failed with status ${response.status}`);
+            }
+
+            const documentText = await response.text();
+            const parsedDocument = new DOMParser().parseFromString(documentText, 'text/html');
+            const nextPanel = parsedDocument.querySelector('[data-result-panel]');
+
+            if (!(nextPanel instanceof HTMLElement)) {
+              throw new Error('Result panel not found in response');
+            }
+
+            resultPanel.replaceChildren(...nextPanel.cloneNode(true).childNodes);
+            window.history.replaceState({}, '', nextUrl);
+            syncViewToggleState(nextUrl.searchParams.get('view') === 'activity' ? 'activity' : 'card');
+
+            if (status instanceof HTMLElement) {
+              const username = nextUrl.searchParams.get('username') || 'the default profile';
+              status.textContent = `Updated card for ${username}.`;
+            }
+          } catch {
+            window.location.assign(nextUrl);
+          } finally {
+            resultPanel.removeAttribute('aria-busy');
+
+            if (submitButton instanceof HTMLButtonElement) {
+              submitButton.disabled = false;
+              submitButton.textContent = 'Build card';
+            }
+
+            if (status instanceof HTMLElement && status.textContent?.startsWith('Fetching')) {
+              status.textContent = defaultStatus;
+            }
+          }
+        };
+
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+
+          const formData = new FormData(form);
+          const username = formData.get('username')?.toString().trim() ?? '';
+          const nextUrl = new URL(form.action || window.location.href, window.location.origin);
+
+          if (username) {
+            nextUrl.searchParams.set('username', username);
+          } else {
+            nextUrl.searchParams.delete('username');
+          }
+          nextUrl.searchParams.set(
+            'view',
+            viewInput instanceof HTMLInputElement && viewInput.value === 'activity' ? 'activity' : 'card',
+          );
+
+          await loadPanel(nextUrl, 'Fetching a fresh profile card...');
+        });
+
+        for (const toggle of viewToggles) {
+          if (!(toggle instanceof HTMLAnchorElement)) {
+            continue;
+          }
+
+          toggle.addEventListener('click', async (event) => {
+            event.preventDefault();
+            const nextMode = toggle.dataset.viewMode === 'activity' ? 'activity' : 'card';
+            syncViewToggleState(nextMode);
+
+            const formData = new FormData(form);
+            const username = formData.get('username')?.toString().trim() ?? '';
+            const nextUrl = new URL(form.action || window.location.href, window.location.origin);
+
+            if (username) {
+              nextUrl.searchParams.set('username', username);
+            } else {
+              nextUrl.searchParams.delete('username');
+            }
+
+            nextUrl.searchParams.set('view', nextMode);
+            await loadPanel(nextUrl, `Fetching the ${nextMode === 'activity' ? 'activity' : 'profile'} view...`);
+          });
+        }
+      }
+    </script>
   </body>
 </html>
+
+<style>
+  :global(:root) {
+    color-scheme: dark;
+    --bg-ink: #07111e;
+    --bg-deep: #040812;
+    --mint: #76e8d4;
+    --coral: #f97f51;
+    --sun: #ffd166;
+    --text-main: #eff5ff;
+    --text-soft: rgba(230, 239, 255, 0.78);
+    --border-soft: rgba(140, 164, 197, 0.18);
+  }
+
+  :global(body) {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at top left, rgba(15, 103, 104, 0.28), transparent 28%),
+      radial-gradient(circle at 82% 18%, rgba(249, 127, 81, 0.2), transparent 22%),
+      linear-gradient(180deg, var(--bg-ink), var(--bg-deep) 72%);
+    color: var(--text-main);
+    font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+  }
+
+  .shell {
+    width: min(1120px, calc(100% - 2rem));
+    margin: 0 auto;
+    padding: 3.5rem 0 4rem;
+    display: grid;
+    gap: 2rem;
+  }
+
+  .hero {
+    position: relative;
+    display: grid;
+    gap: 1.3rem;
+    padding: 2rem;
+    border-radius: 1.8rem;
+    border: 1px solid var(--border-soft);
+    background:
+      linear-gradient(180deg, rgba(7, 14, 32, 0.78), rgba(7, 11, 21, 0.92)),
+      radial-gradient(circle at top right, rgba(118, 232, 212, 0.16), transparent 26%);
+    overflow: hidden;
+  }
+
+  .hero::after {
+    content: '';
+    position: absolute;
+    inset: auto -10% -40% auto;
+    width: 320px;
+    height: 320px;
+    background: radial-gradient(circle, rgba(249, 127, 81, 0.18), transparent 62%);
+    pointer-events: none;
+  }
+
+  .kicker,
+  .hint,
+  .badge-row,
+  .lookup label,
+  .error-kicker {
+    font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  }
+
+  .kicker,
+  .error-kicker {
+    margin: 0;
+    color: var(--mint);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 0.75rem;
+  }
+
+  h1 {
+    margin: 0;
+    max-width: 13ch;
+    font-size: clamp(3rem, 8vw, 5.6rem);
+    line-height: 0.9;
+    letter-spacing: -0.06em;
+  }
+
+  .lede {
+    margin: 0;
+    max-width: 62ch;
+    color: var(--text-soft);
+    font-size: 1.06rem;
+  }
+
+  .lookup {
+    display: grid;
+    gap: 0.85rem;
+    width: min(100%, 640px);
+  }
+
+  .lookup label {
+    color: rgba(195, 208, 235, 0.82);
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+
+  .lookup-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.8rem;
+  }
+
+  .lookup input {
+    min-width: 0;
+    padding: 1rem 1.1rem;
+    border-radius: 1rem;
+    border: 1px solid rgba(118, 232, 212, 0.25);
+    background: rgba(6, 12, 29, 0.8);
+    color: var(--text-main);
+    font-size: 1rem;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+
+  .lookup button {
+    padding: 1rem 1.25rem;
+    border: 0;
+    border-radius: 1rem;
+    background: linear-gradient(135deg, var(--coral), var(--sun));
+    color: #22130e;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+  }
+
+  .lookup button:disabled {
+    opacity: 0.8;
+    cursor: wait;
+  }
+
+  .hint {
+    margin: 0;
+    color: rgba(190, 203, 228, 0.72);
+    font-size: 0.8rem;
+  }
+
+  .badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .view-toggle {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+
+  .view-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.65rem 0.95rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(222, 231, 245, 0.82);
+    text-decoration: none;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+    font-size: 0.76rem;
+    letter-spacing: 0.04em;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+
+  .view-chip.active {
+    border-color: rgba(118, 232, 212, 0.4);
+    background: rgba(118, 232, 212, 0.12);
+    color: rgba(236, 255, 249, 0.96);
+  }
+
+  .badge-row span {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.55rem 0.8rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(222, 231, 245, 0.82);
+    font-size: 0.8rem;
+  }
+
+  .result-panel {
+    display: grid;
+    transition: opacity 120ms ease;
+  }
+
+  .result-panel[aria-busy='true'] {
+    opacity: 0.72;
+  }
+
+  .error-card,
+  .placeholder-card {
+    padding: 1.4rem;
+    border-radius: 1.5rem;
+    border: 1px solid rgba(249, 127, 81, 0.22);
+    background: rgba(17, 16, 23, 0.82);
+  }
+
+  .error-card h2 {
+    margin: 0.3rem 0 0.5rem;
+  }
+
+  .error-card p,
+  .placeholder-card p {
+    margin: 0;
+    color: var(--text-soft);
+  }
+
+  @media (max-width: 760px) {
+    .shell {
+      width: min(100% - 1.25rem, 1120px);
+      padding-top: 1.5rem;
+    }
+
+    .hero {
+      padding: 1.35rem;
+    }
+
+    .lookup-row {
+      grid-template-columns: 1fr;
+    }
+
+    h1 {
+      max-width: none;
+    }
+  }
+</style>
