@@ -14,7 +14,7 @@ A workshop template for building a retro arcade-themed website with Astro that c
 ## ✨ Why this repo
 
 - 🕹️ **Fun output**: build a game-like site instead of another TODO app
-- 🤖 **Agentic workflow practice**: prompts, planning, delegated tasks, and review loops
+- 🤖 **AI-assisted workflow practice**: prompts, planning, delegated tasks, and review loops
 - 🧭 **Two learning paths**: choose VS Code or CLI based on how you work
 - 🧱 **Practical stack**: Astro, API routes, and deploy-ready structure
 
@@ -42,6 +42,8 @@ The workshop supports two tracks — follow the one that matches your preferred 
 | [06](workshop/06-bonus.md) | Bonus & Extensions | Open-ended feature ideas and extra Copilot experiments |
 
 ## 🧰 Choose your setup
+
+After completing **Start in 3 steps** above:
 
 - **VS Code track**
   - Clone your repo and open it in VS Code.
